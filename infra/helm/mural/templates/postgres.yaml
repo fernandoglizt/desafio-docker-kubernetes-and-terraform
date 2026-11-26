@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "mural.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "mural.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "mural.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ .Release.Name }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mural.labels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "mural.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef: { name: {{ .Release.Name }}-config, key: POSTGRES_USER }
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef: { name: {{ .Release.Name }}-config, key: POSTGRES_DB }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-database, key: POSTGRES_PASSWORD }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          startupProbe:
+            exec:
+              command: [sh, -ec, 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: [sh, -ec, 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: postgres }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage | quote }}

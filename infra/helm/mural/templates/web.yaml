@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-web
+  labels:
+    {{- include "mural.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mural.labels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      annotations:
+        mural.local/chart-revision: {{ .Values.chartRevision | quote }}
+      labels:
+        {{- include "mural.labels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: web
+          image: {{ printf "%s:%s" .Values.web.image.repository .Values.web.image.tag | quote }}
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - name: API_UPSTREAM
+              valueFrom:
+                configMapKeyRef: { name: {{ .Release.Name }}-config, key: API_UPSTREAM }
+          livenessProbe:
+            tcpSocket: { port: http }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-web
+  labels:
+    {{- include "mural.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "mural.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - { name: http, port: 80, targetPort: http }

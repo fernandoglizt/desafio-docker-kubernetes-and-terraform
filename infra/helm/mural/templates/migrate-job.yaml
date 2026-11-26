@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate-{{ include "mural.migrationHash" . }}
+  labels:
+    {{- include "mural.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 180
+  template:
+    metadata:
+      labels:
+        {{- include "mural.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ .Values.postgres.image | quote }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-database, key: DATABASE_URL }
+          command: [sh, -ec]
+          args:
+            - |
+              until pg_isready -d "$DATABASE_URL"; do sleep 2; done
+              set --
+              for file in /migrations/*.sql; do
+                set -- "$@" -f "$file"
+              done
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction "$@"
+          volumeMounts:
+            - { name: migrations, mountPath: /migrations, readOnly: true }
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+      volumes:
+        - name: migrations
+          configMap:
+            name: {{ .Release.Name }}-migrations
